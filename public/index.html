@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surf Dashboard</title>
+<style>
+  :root { --bg:#0b1220; --card:#131c2e; --line:#22304a; --text:#e6edf7; --muted:#8193b2;
+          --sup:#35c7a5; --surf:#4c9dff; --wing:#ffb347; --off:#3a4660; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.3 system-ui,sans-serif; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:8px 14px; }
+  header h1 { font-size:18px; margin:0; }
+  header span { color:var(--muted); font-size:13px; }
+  main { display:grid; grid-template-columns: 1fr; gap:6px; padding:0 10px 10px; }
+  @media (min-width:900px) { main { grid-template-columns: 1fr 1fr; } }
+  .row { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px;
+         display:grid; grid-template-columns: 1.4fr 1fr 1fr auto; align-items:center; gap:10px; cursor:pointer; }
+  .row.sel { border-color:var(--surf); }
+  .name { font-weight:600; }
+  .sub { color:var(--muted); font-size:12px; }
+  .big { font-size:20px; font-weight:700; }
+  .arrow { display:inline-block; }
+  .icons { display:flex; gap:6px; }
+  .ic { font-size:22px; width:36px; height:36px; border-radius:8px; display:grid; place-items:center;
+        background:var(--off); filter:grayscale(1); opacity:.35; }
+  .ic.on { filter:none; opacity:1; }
+  .ic.on.sup { background:var(--sup); } .ic.on.surf { background:var(--surf); } .ic.on.wing { background:var(--wing); }
+  .spark { grid-column:1 / -1; display:none; }
+  .row.sel .spark { display:block; }
+  .spark table { width:100%; border-collapse:collapse; font-size:12px; text-align:center; }
+  .spark td { padding:2px; color:var(--muted); }
+  .err { color:#ff7a7a; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌊 Surf Dashboard</h1>
+  <span id="meta">loading…</span>
+</header>
+<main id="list"></main>
+<script>
+const ICONS = { sup: "🏄‍♂️", surf: "🌊", wing: "🪁" };
+const LABEL = { sup: "SUP", surf: "Surf", wing: "Wing" };
+let selected = null;
+try { selected = localStorage.getItem("sel"); } catch {}
+
+const fmtTime = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jerusalem" });
+// Meteorological direction = where it comes FROM; arrow points where it goes.
+const arrow = (deg) => deg == null ? "" : `<span class="arrow" style="transform:rotate(${deg + 180}deg)">↑</span>`;
+const n = (v, d = 1) => v == null ? "–" : v.toFixed(d);
+
+function render(data) {
+  document.getElementById("meta").textContent =
+    `SUP ≤ ${data.thresholds.supMaxWaveM} m · Wing ≥ ${data.thresholds.wingMinWindKn} kn · updated ${fmtTime(data.updated)}`;
+  document.getElementById("list").innerHTML = data.beaches.map((b) => {
+    const wa = b.now.wave, wi = b.now.wind;
+    const icons = Object.keys(ICONS).map((k) =>
+      `<div class="ic ${k} ${b.now.act[k] ? "on" : ""}" title="${LABEL[k]}">${ICONS[k]}</div>`).join("");
+    const hours = b.hours.filter((_, i) => i % 2 === 0);
+    const spark = `<div class="spark"><table>
+      <tr>${hours.map((h) => `<td>${fmtTime(h.t)}</td>`).join("")}</tr>
+      <tr>${hours.map((h) => `<td>${n(h.wave?.m)} m</td>`).join("")}</tr>
+      <tr>${hours.map((h) => `<td>${n(h.wind?.kn, 0)} kn</td>`).join("")}</tr>
+      <tr>${hours.map((h) => `<td>${Object.keys(ICONS).filter((k) => h.act[k]).map((k) => ICONS[k]).join("") || "·"}</td>`).join("")}</tr>
+    </table></div>`;
+    return `<div class="row ${b.id === selected ? "sel" : ""}" data-id="${b.id}">
+      <div><div class="name">${b.name}</div><div class="sub">${b.windSource}</div>
+        ${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
+      <div><div class="big">${n(wa?.m)} m</div><div class="sub">${n(wa?.period, 0)} s ${arrow(wa?.dir)}</div></div>
+      <div><div class="big">${n(wi?.kn, 0)} kn</div><div class="sub">G ${n(wi?.gust, 0)} ${arrow(wi?.dir)}</div></div>
+      <div class="icons">${icons}</div>
+      ${spark}
+    </div>`;
+  }).join("");
+}
+
+document.getElementById("list").addEventListener("click", (e) => {
+  const row = e.target.closest(".row");
+  if (!row) return;
+  selected = selected === row.dataset.id ? null : row.dataset.id;
+  try { localStorage.setItem("sel", selected ?? ""); } catch {}
+  document.querySelectorAll(".row").forEach((r) => r.classList.toggle("sel", r.dataset.id === selected));
+});
+
+async function load() {
+  try {
+    const res = await fetch("/api/conditions");
+    render(await res.json());
+  } catch (e) {
+    document.getElementById("meta").textContent = "offline – retrying";
+  }
+}
+load();
+setInterval(load, 15 * 60 * 1000);
+</script>
+</body>
+</html>

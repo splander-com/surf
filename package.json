@@ -1,0 +1,8 @@
+{
+  "name": "surf",
+  "private": true,
+  "type": "module",
+  "description": "SUP / surf / wing conditions dashboard for Israeli beaches",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20.11" }
+}
