@@ -26,3 +26,11 @@ export const WG_MODEL = 23; // Windguru WRF 9 km
 export const CACHE_MS = 15 * 60 * 1000;
 export const PORT = Number(process.env.PORT) || 8080;
 export const DEFAULT_BEACH = "jaffa";
+
+// Windy webcams (https://api.windy.com/webcams): used for beaches without a `cam`
+// above, only when WINDY_API_KEY is set in the environment.
+export const WINDY = {
+  apiKey: process.env.WINDY_API_KEY || "",
+  radiusKm: 15,
+  cacheMs: 60 * 60 * 1000, // the camera list changes rarely
+};

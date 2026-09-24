@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { BEACHES, THRESHOLDS, WG_MODEL, CACHE_MS, PORT, DEFAULT_BEACH } from "./config.js";
+import { BEACHES, THRESHOLDS, WG_MODEL, CACHE_MS, PORT, DEFAULT_BEACH, WINDY } from "./config.js";
 
 const HOURS = 12;
 const PUBLIC = join(import.meta.dirname, "public");
@@ -10,9 +10,9 @@ const cache = new Map();
 // Returns { value, at } where `at` is when the data was fetched. If a refresh
 // fails, the last good value is served (stale-if-error) so the kiosk keeps
 // showing something; its old `at` is what drives the page's "stale" badge.
-async function cached(key, fn) {
+async function cached(key, fn, maxAge = CACHE_MS) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit;
+  if (hit && Date.now() - hit.at < maxAge) return hit;
   try {
     const entry = { at: Date.now(), value: await fn() };
     cache.set(key, entry);
@@ -77,6 +77,59 @@ async function waves(lat, lon) {
 
 // Closest sample to t, but never further than maxMs away — otherwise a forecast
 // that ends early (Windguru WRF stops ~78 h after its run) repeats its last value.
+const km = (a, b) => {
+  const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+};
+
+// Windy webcams API v3: `player.live|day|month|year|lifetime` are iframe embed URLs.
+// (v2 used { available, embed } objects — accepted too, in case of an old response.)
+const embedOf = (v) => (typeof v === "string" ? v : v?.available !== false ? v?.embed : null) || null;
+const WINDY_URL = process.env.WINDY_WEBCAMS_URL || "https://api.windy.com/webcams/api/v3/webcams";
+
+async function windyCams(lat, lon) {
+  const d = await getJson(
+    `${WINDY_URL}?nearby=${lat},${lon},${WINDY.radiusKm}&include=location,player&limit=50&lang=en`,
+    { "x-windy-api-key": WINDY.apiKey },
+  );
+  return (d.webcams ?? [])
+    .filter((w) => (w.status ?? "active") === "active")
+    .map((w) => {
+      const p = w.player ?? {};
+      // Prefer a live stream; otherwise today's timelapse.
+      const kind = ["live", "day"].find((k) => embedOf(p[k]));
+      const loc = w.location ?? {};
+      return kind && {
+        url: embedOf(p[kind]),
+        kind,
+        title: w.title ?? "Webcam",
+        km: loc.latitude != null ? km({ lat, lon }, { lat: loc.latitude, lon: loc.longitude }) : null,
+      };
+    })
+    .filter((c) => c && (c.km == null || c.km <= WINDY.radiusKm))
+    // live streams first, then nearest
+    .sort((a, b) => (b.kind === "live") - (a.kind === "live") || (a.km ?? 1e9) - (b.km ?? 1e9));
+}
+
+// A hand-picked `cam` in config.js wins; otherwise the best Windy camera, if a key is set.
+// Any Windy failure just means "no camera" — it never breaks the forecast.
+async function camFor(b) {
+  if (b.cam) return { url: b.cam, title: null, source: null };
+  if (!WINDY.apiKey) return null;
+  try {
+    const { value } = await cached(`windy:${b.lat},${b.lon}`, () => windyCams(b.lat, b.lon), WINDY.cacheMs);
+    const c = value[0];
+    return c ? { url: c.url, title: c.title, source: "Windy.com", kind: c.kind, km: c.km } : null;
+  } catch (e) {
+    console.warn(`windy webcams for ${b.id}: ${e.message}`);
+    // Remember the failure for one normal cache period, so a bad key or an outage
+    // isn't retried (and logged) on every request.
+    cache.set(`windy:${b.lat},${b.lon}`, { at: Date.now() - WINDY.cacheMs + CACHE_MS, value: [] });
+    return null;
+  }
+}
+
 function nearest(series, t, maxMs = 90 * 60e3) {
   let best = null;
   for (const p of series) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
@@ -95,11 +148,12 @@ function activities(wave, wind) {
 }
 
 async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
-  const [wgRes, omRes, waveRes] = await Promise.allSettled([
+  const [wgRes, omRes, waveRes, camRes] = await Promise.allSettled([
     b.wgSpot ? cached(`wg:${b.wgSpot}`, () => windguruWind(b.wgSpot)) : Promise.resolve(null),
     // Open-Meteo is the fallback when Windguru fails and the filler past its horizon.
     cached(`omwind:${b.lat},${b.lon}`, () => openMeteoWind(b.lat, b.lon)),
     cached(`wave:${b.lat},${b.lon}`, () => waves(b.lat, b.lon)),
+    camFor(b),
   ]);
   const ok = (r) => (r.status === "fulfilled" ? r.value : null);
   const wg = ok(wgRes)?.value ?? [];
@@ -120,7 +174,7 @@ async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
   return {
     id: b.id,
     name: b.name,
-    cam: b.cam ?? null,
+    cam: ok(camRes),
     dataAt: Number.isFinite(dataAt) ? dataAt : null,
     windSource: wg.length ? `Windguru WRF 9 km (spot ${b.wgSpot})` : "Open-Meteo",
     // Open-Meteo wind is only a gap filler when Windguru works, so its failure alone isn't "partial data".
