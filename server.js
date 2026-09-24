@@ -22,6 +22,9 @@ async function getJson(url, headers = {}) {
 }
 
 // Windguru's unofficial API only answers with a Referer from its own site.
+// WINDSPD and GUST are already knots — checked against Open-Meteo in knots
+// (hourly fit slope ~1.1 at most spots, never the 0.51 of m/s or 1.85 of km/h);
+// re-run `node scripts/check-wind-units.mjs` if the numbers ever look off.
 async function windguruWind(spot) {
   const d = await getJson(
     `https://www.windguru.cz/int/iapi.php?q=forecast&id_model=${WG_MODEL}&id_spot=${spot}`,
