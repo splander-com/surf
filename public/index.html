@@ -53,7 +53,7 @@
     <div class="legend">
       <span><i class="sw" style="background:var(--sup)"></i>Waves ≤ SUP limit</span>
       <span><i class="sw" style="background:var(--surf)"></i>Waves (surf)</span>
-      <span><i class="sw" style="background:var(--wing)"></i>Wind kn (WRF 9 km)</span>
+      <span><i class="sw" style="background:var(--wing)"></i>Wind kn · <span id="wsrc">–</span></span>
       <span>– – limits</span>
     </div>
     <div id="chart"></div>
@@ -150,6 +150,8 @@ function renderChart(fc) {
   });
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="72 hour forecast for ${fc.name}">${s}</svg>`;
   document.getElementById("ptitle").textContent = `${fc.name} · next 3 days`;
+  const filled = fc.windSource.startsWith("Windguru") && pts.some((p) => p.wind?.src === "om");
+  document.getElementById("wsrc").textContent = fc.windSource + (filled ? " + Open-Meteo after its horizon" : "");
 }
 
 async function loadForecast() {

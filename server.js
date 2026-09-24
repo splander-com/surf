@@ -64,10 +64,12 @@ async function waves(lat, lon) {
   }));
 }
 
-function nearest(series, t) {
+// Closest sample to t, but never further than maxMs away — otherwise a forecast
+// that ends early (Windguru WRF stops ~78 h after its run) repeats its last value.
+function nearest(series, t, maxMs = 90 * 60e3) {
   let best = null;
   for (const p of series) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
-  return best;
+  return best && Math.abs(best.t - t) <= maxMs ? best : null;
 }
 
 function activities(wave, wind) {
@@ -82,19 +84,22 @@ function activities(wave, wind) {
 }
 
 async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
-  const [windRes, waveRes] = await Promise.allSettled([
-    cached(`wind:${b.wgSpot ?? `${b.lat},${b.lon}`}`, () =>
-      b.wgSpot ? windguruWind(b.wgSpot) : openMeteoWind(b.lat, b.lon),
-    ).catch(() => cached(`omwind:${b.lat},${b.lon}`, () => openMeteoWind(b.lat, b.lon))),
+  const omWind = () => cached(`omwind:${b.lat},${b.lon}`, () => openMeteoWind(b.lat, b.lon));
+  const [wgRes, omRes, waveRes] = await Promise.allSettled([
+    b.wgSpot ? cached(`wg:${b.wgSpot}`, () => windguruWind(b.wgSpot)) : Promise.resolve([]),
+    // Open-Meteo is the fallback when Windguru fails and the filler past its horizon.
+    omWind(),
     cached(`wave:${b.lat},${b.lon}`, () => waves(b.lat, b.lon)),
   ]);
-  const wind = windRes.status === "fulfilled" ? windRes.value : [];
+  const wg = wgRes.status === "fulfilled" ? wgRes.value : [];
+  const om = omRes.status === "fulfilled" ? omRes.value : [];
   const wave = waveRes.status === "fulfilled" ? waveRes.value : [];
   const now = Date.now();
   const start = Math.floor(now / 3600e3) * 3600e3;
   const hours = Array.from({ length: Math.ceil(hoursAhead / stepH) }, (_, i) => {
     const t = i === 0 ? now : start + i * stepH * 3600e3;
-    const wi = nearest(wind, t);
+    const wg1 = nearest(wg, t);
+    const wi = wg1 ? { ...wg1, src: "wg" } : (nearest(om, t) && { ...nearest(om, t), src: "om" });
     const wa = nearest(wave, t);
     return { t, wind: wi, wave: wa, act: activities(wa, wi) };
   });
@@ -102,8 +107,10 @@ async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
     id: b.id,
     name: b.name,
     cam: b.cam ?? null,
-    windSource: b.wgSpot ? `Windguru WRF 9 km (spot ${b.wgSpot})` : "Open-Meteo",
-    errors: [windRes, waveRes].filter((r) => r.status === "rejected").map((r) => String(r.reason)),
+    windSource: wg.length ? `Windguru WRF 9 km (spot ${b.wgSpot})` : "Open-Meteo",
+    // Open-Meteo wind is only a gap filler when Windguru works, so its failure alone isn't "partial data".
+    errors: [wgRes, wg.length ? null : omRes, waveRes]
+      .filter((r) => r?.status === "rejected").map((r) => String(r.reason)),
     now: hours[0],
     hours,
   };
@@ -113,12 +120,13 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", "
 
 createServer(async (req, res) => {
   try {
-    if (req.url === "/api/conditions") {
+    const url = req.url.split("?")[0];
+    if (url === "/api/conditions") {
       const beaches = await Promise.all(BEACHES.map((b) => beachReport(b)));
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ updated: Date.now(), thresholds: THRESHOLDS, defaultBeach: DEFAULT_BEACH, beaches }));
     }
-    const fc = req.url.match(/^\/api\/forecast\/([\w-]+)$/);
+    const fc = url.match(/^\/api\/forecast\/([\w-]+)$/);
     if (fc) {
       const b = BEACHES.find((x) => x.id === fc[1]);
       if (!b) throw Object.assign(new Error("no beach"), { code: "ENOENT" });
@@ -126,7 +134,7 @@ createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ thresholds: THRESHOLDS, ...report }));
     }
-    const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
+    const path = url === "/" ? "/index.html" : url;
     if (path.includes("..")) throw Object.assign(new Error("bad path"), { code: "ENOENT" });
     const body = await readFile(join(PUBLIC, path));
     res.writeHead(200, { "Content-Type": TYPES[extname(path)] ?? "application/octet-stream" });
