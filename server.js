@@ -101,6 +101,7 @@ async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
   return {
     id: b.id,
     name: b.name,
+    cam: b.cam ?? null,
     windSource: b.wgSpot ? `Windguru WRF 9 km (spot ${b.wgSpot})` : "Open-Meteo",
     errors: [windRes, waveRes].filter((r) => r.status === "rejected").map((r) => String(r.reason)),
     now: hours[0],

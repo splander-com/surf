@@ -12,4 +12,4 @@ npm start            # http://<this-computer-ip>:8080 → open on the tablet
 
 Right panel: 72 h forecast graph for the selected beach (default Jaffa, `DEFAULT_BEACH` in config.js).
 
-Phase 2: live camera streams.
+Cameras: optional `cam` per beach in config.js — embeddable sources only (YouTube live, provider embed codes). beachcam.co.il is domain-locked and excluded.

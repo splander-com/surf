@@ -33,6 +33,7 @@
   #panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
            display:flex; flex-direction:column; min-height:0; }
   #panel h2 { margin:0 0 2px; font-size:16px; }
+  #cam iframe { width:100%; aspect-ratio:16/9; max-height:45vh; border:0; border-radius:6px; display:block; margin-bottom:6px; background:#000; }
   #chart { flex:1; min-height:0; }
   #chart svg { width:100%; height:100%; display:block; }
   .legend { display:flex; gap:12px; font-size:11px; color:var(--muted); flex-wrap:wrap; }
@@ -47,6 +48,7 @@
 <main>
   <div id="list"></div>
   <section id="panel">
+    <div id="cam"></div>
     <h2 id="ptitle">Forecast</h2>
     <div class="legend">
       <span><i class="sw" style="background:var(--sup)"></i>Waves ≤ SUP limit</span>
@@ -79,7 +81,7 @@ function renderList(data) {
     const icons = Object.keys(ICONS).map((k) =>
       `<div class="ic ${k} ${b.now.act[k] ? "on" : ""}" title="${LABEL[k]}">${ICONS[k]}</div>`).join("");
     return `<div class="row ${b.id === selected ? "sel" : ""}" data-id="${b.id}">
-      <div><div class="name">${b.name}</div>${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
+      <div><div class="name">${b.name}${b.cam ? " 📹" : ""}</div>${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
       <div><div class="big">${n(wa?.m)} m</div><div class="sub">${n(wa?.period, 0)} s ${arrow(wa?.dir)}</div></div>
       <div><div class="big">${n(wi?.kn, 0)} kn</div><div class="sub">G ${n(wi?.gust, 0)} ${arrow(wi?.dir)}</div></div>
       <div class="icons">${icons}</div>
@@ -91,6 +93,12 @@ function renderList(data) {
 // day bands, threshold lines, and an activity icon row every 3 h.
 function renderChart(fc) {
   lastForecast = fc;
+  const cam = document.getElementById("cam");
+  // Only swap the iframe when the camera changes, so a refresh doesn't restart the video.
+  if ((fc.cam ?? "") !== (cam.dataset.src ?? "")) {
+    cam.dataset.src = fc.cam ?? "";
+    cam.innerHTML = fc.cam ? `<iframe src="${fc.cam}" allow="autoplay; encrypted-media" allowfullscreen title="${fc.name} live camera"></iframe>` : "";
+  }
   const el = document.getElementById("chart");
   const W = Math.max(300, el.clientWidth), H = Math.max(200, el.clientHeight);
   const T = fc.thresholds, pts = fc.hours;
