@@ -22,3 +22,4 @@ export const THRESHOLDS = {
 export const WG_MODEL = 23; // Windguru WRF 9 km
 export const CACHE_MS = 15 * 60 * 1000;
 export const PORT = Number(process.env.PORT) || 8080;
+export const DEFAULT_BEACH = "jaffa";

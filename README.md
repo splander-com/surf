@@ -10,4 +10,6 @@ Kiosk page for a Fire 7 tablet: SUP / surf / wing conditions for Israeli beaches
 npm start            # http://<this-computer-ip>:8080 → open on the tablet
 ```
 
-Phase 2: live camera streams in a right-hand panel on row tap.
+Right panel: 72 h forecast graph for the selected beach (default Jaffa, `DEFAULT_BEACH` in config.js).
+
+Phase 2: live camera streams.

@@ -8,29 +8,35 @@
   :root { --bg:#0b1220; --card:#131c2e; --line:#22304a; --text:#e6edf7; --muted:#8193b2;
           --sup:#35c7a5; --surf:#4c9dff; --wing:#ffb347; --off:#3a4660; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.3 system-ui,sans-serif; }
-  header { display:flex; justify-content:space-between; align-items:center; padding:8px 14px; }
-  header h1 { font-size:18px; margin:0; }
-  header span { color:var(--muted); font-size:13px; }
-  main { display:grid; grid-template-columns: 1fr; gap:6px; padding:0 10px 10px; }
-  @media (min-width:900px) { main { grid-template-columns: 1fr 1fr; } }
-  .row { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px;
-         display:grid; grid-template-columns: 1.4fr 1fr 1fr auto; align-items:center; gap:10px; cursor:pointer; }
-  .row.sel { border-color:var(--surf); }
-  .name { font-weight:600; }
-  .sub { color:var(--muted); font-size:12px; }
-  .big { font-size:20px; font-weight:700; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.3 system-ui,sans-serif;
+         display:flex; flex-direction:column; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; }
+  header h1 { font-size:17px; margin:0; }
+  header span { color:var(--muted); font-size:12px; }
+  main { flex:1; min-height:0; display:grid; grid-template-columns: 42fr 58fr; gap:8px; padding:0 8px 8px; }
+  @media (max-width:700px) { main { grid-template-columns:1fr; } }
+  #list { overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+  .row { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:5px 8px;
+         display:grid; grid-template-columns: 1.5fr .9fr .9fr auto; align-items:center; gap:6px; cursor:pointer; }
+  .row.sel { border-color:var(--surf); background:#172440; }
+  .name { font-weight:600; font-size:14px; }
+  .sub { color:var(--muted); font-size:11px; }
+  .big { font-size:17px; font-weight:700; }
   .arrow { display:inline-block; }
-  .icons { display:flex; gap:6px; }
-  .ic { font-size:22px; width:36px; height:36px; border-radius:8px; display:grid; place-items:center;
-        background:var(--off); filter:grayscale(1); opacity:.35; }
+  .icons { display:flex; gap:3px; }
+  .ic { font-size:17px; width:28px; height:28px; border-radius:6px; display:grid; place-items:center;
+        background:var(--off); filter:grayscale(1); opacity:.3; }
   .ic.on { filter:none; opacity:1; }
   .ic.on.sup { background:var(--sup); } .ic.on.surf { background:var(--surf); } .ic.on.wing { background:var(--wing); }
-  .spark { grid-column:1 / -1; display:none; }
-  .row.sel .spark { display:block; }
-  .spark table { width:100%; border-collapse:collapse; font-size:12px; text-align:center; }
-  .spark td { padding:2px; color:var(--muted); }
-  .err { color:#ff7a7a; font-size:12px; }
+  .err { color:#ff7a7a; font-size:11px; }
+  #panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+           display:flex; flex-direction:column; min-height:0; }
+  #panel h2 { margin:0 0 2px; font-size:16px; }
+  #chart { flex:1; min-height:0; }
+  #chart svg { width:100%; height:100%; display:block; }
+  .legend { display:flex; gap:12px; font-size:11px; color:var(--muted); flex-wrap:wrap; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px; margin-right:3px; }
 </style>
 </head>
 <body>
@@ -38,57 +44,131 @@
   <h1>🌊 Surf Dashboard</h1>
   <span id="meta">loading…</span>
 </header>
-<main id="list"></main>
+<main>
+  <div id="list"></div>
+  <section id="panel">
+    <h2 id="ptitle">Forecast</h2>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--sup)"></i>Waves ≤ SUP limit</span>
+      <span><i class="sw" style="background:var(--surf)"></i>Waves (surf)</span>
+      <span><i class="sw" style="background:var(--wing)"></i>Wind kn (WRF 9 km)</span>
+      <span>– – limits</span>
+    </div>
+    <div id="chart"></div>
+  </section>
+</main>
 <script>
 const ICONS = { sup: "🏄‍♂️", surf: "🌊", wing: "🪁" };
 const LABEL = { sup: "SUP", surf: "Surf", wing: "Wing" };
-let selected = null;
-try { selected = localStorage.getItem("sel"); } catch {}
+const TZ = "Asia/Jerusalem";
+let selected = null, lastForecast = null;
+try { selected = localStorage.getItem("sel") || null; } catch {}
 
-const fmtTime = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jerusalem" });
-// Meteorological direction = where it comes FROM; arrow points where it goes.
+const fmtTime = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
+const hourOf = (t) => Number(new Date(t).toLocaleString("en-GB", { hour: "2-digit", hour12: false, timeZone: TZ }));
+const dayOf = (t) => new Date(t).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", timeZone: TZ });
+// Meteorological direction = where it comes FROM; the arrow points where it goes.
 const arrow = (deg) => deg == null ? "" : `<span class="arrow" style="transform:rotate(${deg + 180}deg)">↑</span>`;
 const n = (v, d = 1) => v == null ? "–" : v.toFixed(d);
 
-function render(data) {
+function renderList(data) {
   document.getElementById("meta").textContent =
     `SUP ≤ ${data.thresholds.supMaxWaveM} m · Wing ≥ ${data.thresholds.wingMinWindKn} kn · updated ${fmtTime(data.updated)}`;
   document.getElementById("list").innerHTML = data.beaches.map((b) => {
     const wa = b.now.wave, wi = b.now.wind;
     const icons = Object.keys(ICONS).map((k) =>
       `<div class="ic ${k} ${b.now.act[k] ? "on" : ""}" title="${LABEL[k]}">${ICONS[k]}</div>`).join("");
-    const hours = b.hours.filter((_, i) => i % 2 === 0);
-    const spark = `<div class="spark"><table>
-      <tr>${hours.map((h) => `<td>${fmtTime(h.t)}</td>`).join("")}</tr>
-      <tr>${hours.map((h) => `<td>${n(h.wave?.m)} m</td>`).join("")}</tr>
-      <tr>${hours.map((h) => `<td>${n(h.wind?.kn, 0)} kn</td>`).join("")}</tr>
-      <tr>${hours.map((h) => `<td>${Object.keys(ICONS).filter((k) => h.act[k]).map((k) => ICONS[k]).join("") || "·"}</td>`).join("")}</tr>
-    </table></div>`;
     return `<div class="row ${b.id === selected ? "sel" : ""}" data-id="${b.id}">
-      <div><div class="name">${b.name}</div><div class="sub">${b.windSource}</div>
-        ${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
+      <div><div class="name">${b.name}</div>${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
       <div><div class="big">${n(wa?.m)} m</div><div class="sub">${n(wa?.period, 0)} s ${arrow(wa?.dir)}</div></div>
       <div><div class="big">${n(wi?.kn, 0)} kn</div><div class="sub">G ${n(wi?.gust, 0)} ${arrow(wi?.dir)}</div></div>
       <div class="icons">${icons}</div>
-      ${spark}
     </div>`;
   }).join("");
 }
 
+// 72 h chart: wave bars (left axis, m), wind line + gust dots (right axis, kn),
+// day bands, threshold lines, and an activity icon row every 3 h.
+function renderChart(fc) {
+  lastForecast = fc;
+  const el = document.getElementById("chart");
+  const W = Math.max(300, el.clientWidth), H = Math.max(200, el.clientHeight);
+  const T = fc.thresholds, pts = fc.hours;
+  const L = 30, R = 30, TOP = 26, BOT = 40, pw = W - L - R, ph = H - TOP - BOT;
+  const maxM = Math.max(1, T.supMaxWaveM * 2, ...pts.map((p) => p.wave?.m ?? 0)) * 1.1;
+  const maxK = Math.max(20, T.wingMinWindKn * 1.5, ...pts.map((p) => p.wind?.gust ?? p.wind?.kn ?? 0)) * 1.1;
+  const x = (i) => L + (i + 0.5) * pw / pts.length;
+  const yM = (m) => TOP + ph - (m / maxM) * ph;
+  const yK = (k) => TOP + ph - (k / maxK) * ph;
+  const bw = Math.max(1, pw / pts.length - 1);
+  let s = "";
+  // day bands
+  pts.forEach((p, i) => {
+    if (i === 0 || hourOf(p.t) === 0) {
+      const alt = pts.slice(0, i).filter((q, j) => j === 0 || hourOf(q.t) === 0).length % 2;
+      let end = pts.findIndex((q, j) => j > i && hourOf(q.t) === 0); if (end < 0) end = pts.length;
+      s += `<rect x="${L + i * pw / pts.length}" y="${TOP}" width="${(end - i) * pw / pts.length}" height="${ph}" fill="${alt ? "#ffffff08" : "none"}"/>`;
+      s += `<text x="${L + i * pw / pts.length + 4}" y="${TOP - 8}" fill="#e6edf7" font-size="12" font-weight="600">${dayOf(p.t)}</text>`;
+    }
+  });
+  // gridlines + axes labels
+  for (let k = 0; k <= maxK; k += 5) s += `<text x="${W - R + 4}" y="${yK(k) + 3}" fill="#ffb347" font-size="10">${k}</text>`;
+  for (let m = 0; m <= maxM; m += 0.5) {
+    s += `<line x1="${L}" x2="${W - R}" y1="${yM(m)}" y2="${yM(m)}" stroke="#22304a"/>`;
+    s += `<text x="${L - 4}" y="${yM(m) + 3}" fill="#4c9dff" font-size="10" text-anchor="end">${m.toFixed(1)}</text>`;
+  }
+  // wave bars
+  pts.forEach((p, i) => {
+    const m = p.wave?.m; if (m == null) return;
+    s += `<rect x="${x(i) - bw / 2}" y="${yM(m)}" width="${bw}" height="${TOP + ph - yM(m)}" fill="${m <= T.supMaxWaveM ? "#35c7a5" : "#4c9dff"}" opacity=".85"/>`;
+  });
+  // thresholds
+  s += `<line x1="${L}" x2="${W - R}" y1="${yM(T.supMaxWaveM)}" y2="${yM(T.supMaxWaveM)}" stroke="#35c7a5" stroke-dasharray="4 4"/>`;
+  s += `<line x1="${L}" x2="${W - R}" y1="${yK(T.wingMinWindKn)}" y2="${yK(T.wingMinWindKn)}" stroke="#ffb347" stroke-dasharray="4 4"/>`;
+  // wind line + gusts
+  const line = pts.map((p, i) => p.wind ? `${x(i)},${yK(p.wind.kn)}` : null).filter(Boolean).join(" ");
+  s += `<polyline points="${line}" fill="none" stroke="#ffb347" stroke-width="2.5"/>`;
+  pts.forEach((p, i) => { if (p.wind?.gust != null && i % 3 === 0) s += `<circle cx="${x(i)}" cy="${yK(p.wind.gust)}" r="1.8" fill="#ffb34799"/>`; });
+  // now marker
+  s += `<line x1="${x(0)}" x2="${x(0)}" y1="${TOP}" y2="${TOP + ph}" stroke="#e6edf7" stroke-width="1" opacity=".6"/>`;
+  // bottom rows: hour, wind arrow, activity icons (every 3 h)
+  pts.forEach((p, i) => {
+    if (i % 3) return;
+    const cx = x(i);
+    s += `<text x="${cx}" y="${TOP + ph + 12}" fill="#8193b2" font-size="9" text-anchor="middle">${String(hourOf(p.t)).padStart(2, "0")}</text>`;
+    if (p.wind?.dir != null) s += `<text x="${cx}" y="${TOP + ph + 24}" fill="#ffb347" font-size="10" text-anchor="middle" transform="rotate(${p.wind.dir + 180} ${cx} ${TOP + ph + 21})">↑</text>`;
+    const ic = Object.keys(ICONS).filter((k) => p.act[k]).map((k) => ICONS[k]).join("");
+    if (ic) s += `<text x="${cx}" y="${TOP + ph + 37}" font-size="9" text-anchor="middle">${ic}</text>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="72 hour forecast for ${fc.name}">${s}</svg>`;
+  document.getElementById("ptitle").textContent = `${fc.name} · next 3 days`;
+}
+
+async function loadForecast() {
+  try {
+    const res = await fetch(`/api/forecast/${selected}`);
+    if (res.ok) renderChart(await res.json());
+  } catch {}
+}
+
 document.getElementById("list").addEventListener("click", (e) => {
   const row = e.target.closest(".row");
-  if (!row) return;
-  selected = selected === row.dataset.id ? null : row.dataset.id;
-  try { localStorage.setItem("sel", selected ?? ""); } catch {}
+  if (!row || row.dataset.id === selected) return;
+  selected = row.dataset.id;
+  try { localStorage.setItem("sel", selected); } catch {}
   document.querySelectorAll(".row").forEach((r) => r.classList.toggle("sel", r.dataset.id === selected));
+  loadForecast();
 });
+window.addEventListener("resize", () => lastForecast && renderChart(lastForecast));
 
 async function load() {
   try {
-    const res = await fetch("/api/conditions");
-    render(await res.json());
+    const data = await (await fetch("/api/conditions")).json();
+    if (!selected || !data.beaches.some((b) => b.id === selected)) selected = data.defaultBeach;
+    renderList(data);
+    loadForecast();
   } catch (e) {
-    document.getElementById("meta").textContent = "offline – retrying";
+    document.getElementById("meta").textContent = `offline – retrying (${e.message})`;
   }
 }
 load();

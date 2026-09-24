@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { BEACHES, THRESHOLDS, WG_MODEL, CACHE_MS, PORT } from "./config.js";
+import { BEACHES, THRESHOLDS, WG_MODEL, CACHE_MS, PORT, DEFAULT_BEACH } from "./config.js";
 
 const HOURS = 12;
 const PUBLIC = join(import.meta.dirname, "public");
@@ -39,7 +39,7 @@ async function windguruWind(spot) {
 async function openMeteoWind(lat, lon) {
   const d = await getJson(
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m&wind_speed_unit=kn&timezone=UTC&forecast_days=2`,
+      `&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m&wind_speed_unit=kn&timezone=UTC&forecast_days=4`,
   );
   const h = d.hourly;
   return h.time.map((t, i) => ({
@@ -53,7 +53,7 @@ async function openMeteoWind(lat, lon) {
 async function waves(lat, lon) {
   const d = await getJson(
     `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}` +
-      `&hourly=wave_height,wave_period,wave_direction&timezone=UTC&forecast_days=2`,
+      `&hourly=wave_height,wave_period,wave_direction&timezone=UTC&forecast_days=4`,
   );
   const h = d.hourly;
   return h.time.map((t, i) => ({
@@ -81,7 +81,7 @@ function activities(wave, wind) {
   };
 }
 
-async function beachReport(b) {
+async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
   const [windRes, waveRes] = await Promise.allSettled([
     cached(`wind:${b.wgSpot ?? `${b.lat},${b.lon}`}`, () =>
       b.wgSpot ? windguruWind(b.wgSpot) : openMeteoWind(b.lat, b.lon),
@@ -91,8 +91,9 @@ async function beachReport(b) {
   const wind = windRes.status === "fulfilled" ? windRes.value : [];
   const wave = waveRes.status === "fulfilled" ? waveRes.value : [];
   const now = Date.now();
-  const hours = Array.from({ length: HOURS }, (_, i) => {
-    const t = now + i * 3600e3;
+  const start = Math.floor(now / 3600e3) * 3600e3;
+  const hours = Array.from({ length: Math.ceil(hoursAhead / stepH) }, (_, i) => {
+    const t = i === 0 ? now : start + i * stepH * 3600e3;
     const wi = nearest(wind, t);
     const wa = nearest(wave, t);
     return { t, wind: wi, wave: wa, act: activities(wa, wi) };
@@ -112,9 +113,17 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", "
 createServer(async (req, res) => {
   try {
     if (req.url === "/api/conditions") {
-      const beaches = await Promise.all(BEACHES.map(beachReport));
+      const beaches = await Promise.all(BEACHES.map((b) => beachReport(b)));
       res.writeHead(200, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ updated: Date.now(), thresholds: THRESHOLDS, beaches }));
+      return res.end(JSON.stringify({ updated: Date.now(), thresholds: THRESHOLDS, defaultBeach: DEFAULT_BEACH, beaches }));
+    }
+    const fc = req.url.match(/^\/api\/forecast\/([\w-]+)$/);
+    if (fc) {
+      const b = BEACHES.find((x) => x.id === fc[1]);
+      if (!b) throw Object.assign(new Error("no beach"), { code: "ENOENT" });
+      const report = await beachReport(b, 72, 1);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ thresholds: THRESHOLDS, ...report }));
     }
     const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
     if (path.includes("..")) throw Object.assign(new Error("bad path"), { code: "ENOENT" });
