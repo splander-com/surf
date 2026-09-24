@@ -7,12 +7,20 @@ const HOURS = 12;
 const PUBLIC = join(import.meta.dirname, "public");
 const cache = new Map();
 
+// Returns { value, at } where `at` is when the data was fetched. If a refresh
+// fails, the last good value is served (stale-if-error) so the kiosk keeps
+// showing something; its old `at` is what drives the page's "stale" badge.
 async function cached(key, fn) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
-  const value = await fn();
-  cache.set(key, { at: Date.now(), value });
-  return value;
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit;
+  try {
+    const entry = { at: Date.now(), value: await fn() };
+    cache.set(key, entry);
+    return entry;
+  } catch (e) {
+    if (hit) return hit;
+    throw e;
+  }
 }
 
 async function getJson(url, headers = {}) {
@@ -87,16 +95,19 @@ function activities(wave, wind) {
 }
 
 async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
-  const omWind = () => cached(`omwind:${b.lat},${b.lon}`, () => openMeteoWind(b.lat, b.lon));
   const [wgRes, omRes, waveRes] = await Promise.allSettled([
-    b.wgSpot ? cached(`wg:${b.wgSpot}`, () => windguruWind(b.wgSpot)) : Promise.resolve([]),
+    b.wgSpot ? cached(`wg:${b.wgSpot}`, () => windguruWind(b.wgSpot)) : Promise.resolve(null),
     // Open-Meteo is the fallback when Windguru fails and the filler past its horizon.
-    omWind(),
+    cached(`omwind:${b.lat},${b.lon}`, () => openMeteoWind(b.lat, b.lon)),
     cached(`wave:${b.lat},${b.lon}`, () => waves(b.lat, b.lon)),
   ]);
-  const wg = wgRes.status === "fulfilled" ? wgRes.value : [];
-  const om = omRes.status === "fulfilled" ? omRes.value : [];
-  const wave = waveRes.status === "fulfilled" ? waveRes.value : [];
+  const ok = (r) => (r.status === "fulfilled" ? r.value : null);
+  const wg = ok(wgRes)?.value ?? [];
+  const om = ok(omRes)?.value ?? [];
+  const wave = ok(waveRes)?.value ?? [];
+  // Age of what's shown: the oldest source the numbers came from.
+  const windAt = wg.length ? ok(wgRes).at : ok(omRes)?.at;
+  const dataAt = Math.min(windAt ?? Infinity, ok(waveRes)?.at ?? Infinity);
   const now = Date.now();
   const start = Math.floor(now / 3600e3) * 3600e3;
   const hours = Array.from({ length: Math.ceil(hoursAhead / stepH) }, (_, i) => {
@@ -110,6 +121,7 @@ async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
     id: b.id,
     name: b.name,
     cam: b.cam ?? null,
+    dataAt: Number.isFinite(dataAt) ? dataAt : null,
     windSource: wg.length ? `Windguru WRF 9 km (spot ${b.wgSpot})` : "Open-Meteo",
     // Open-Meteo wind is only a gap filler when Windguru works, so its failure alone isn't "partial data".
     errors: [wgRes, wg.length ? null : omRes, waveRes]
@@ -119,7 +131,10 @@ async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
   };
 }
 
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
+const TYPES = {
+  ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
+  ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml", ".png": "image/png",
+};
 
 createServer(async (req, res) => {
   try {
@@ -127,7 +142,9 @@ createServer(async (req, res) => {
     if (url === "/api/conditions") {
       const beaches = await Promise.all(BEACHES.map((b) => beachReport(b)));
       res.writeHead(200, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ updated: Date.now(), thresholds: THRESHOLDS, defaultBeach: DEFAULT_BEACH, beaches }));
+      const ats = beaches.map((b) => b.dataAt).filter((t) => t != null);
+      const dataAt = ats.length ? Math.min(...ats) : null;
+      return res.end(JSON.stringify({ updated: Date.now(), dataAt, thresholds: THRESHOLDS, defaultBeach: DEFAULT_BEACH, beaches }));
     }
     const fc = url.match(/^\/api\/forecast\/([\w-]+)$/);
     if (fc) {
@@ -137,7 +154,7 @@ createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ thresholds: THRESHOLDS, ...report }));
     }
-    const path = url === "/" ? "/index.html" : url;
+    const path = url === "/" ? "/index.html" : url === "/favicon.ico" ? "/icon.svg" : url;
     if (path.includes("..")) throw Object.assign(new Error("bad path"), { code: "ENOENT" });
     const body = await readFile(join(PUBLIC, path));
     res.writeHead(200, { "Content-Type": TYPES[extname(path)] ?? "application/octet-stream" });
