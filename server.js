@@ -174,6 +174,7 @@ async function beachReport(b, hoursAhead = HOURS, stepH = 1) {
   return {
     id: b.id,
     name: b.name,
+    he: b.he ?? null,
     cam: ok(camRes),
     dataAt: Number.isFinite(dataAt) ? dataAt : null,
     windSource: wg.length ? `Windguru WRF 9 km (spot ${b.wgSpot})` : "Open-Meteo",
