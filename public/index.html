@@ -135,7 +135,7 @@ const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 function renderList(data) {
   document.getElementById("meta").textContent =
-    `SUP ≤ ${data.thresholds.supMaxWaveM} m · Wing ≥ ${data.thresholds.wingMinWindKn} kn · updated ${fmtTime(data.updated)}`;
+    `SUP ≤ ${data.thresholds.supMaxWaveM} m · Wing ≥ ${data.thresholds.wingMinWindKn} kn · updated ${fmtTime(data.updated)} · v${data.version}`;
   document.getElementById("list").innerHTML = data.beaches.map((b) => {
     const wa = b.now.wave, wi = b.now.wind;
     const icons = Object.keys(ICONS).map((k) =>

@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { BEACHES, THRESHOLDS, WG_MODEL, CACHE_MS, PORT, DEFAULT_BEACH, WINDY } from "./config.js";
 
 const HOURS = 12;
 const PUBLIC = join(import.meta.dirname, "public");
+const VERSION = JSON.parse(readFileSync(join(import.meta.dirname, "package.json"), "utf8")).version;
 const cache = new Map();
 
 // Returns { value, at } where `at` is when the data was fetched. If a refresh
@@ -196,26 +198,27 @@ createServer(async (req, res) => {
     const url = req.url.split("?")[0];
     if (url === "/api/conditions") {
       const beaches = await Promise.all(BEACHES.map((b) => beachReport(b)));
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       const ats = beaches.map((b) => b.dataAt).filter((t) => t != null);
       const dataAt = ats.length ? Math.min(...ats) : null;
-      return res.end(JSON.stringify({ updated: Date.now(), dataAt, thresholds: THRESHOLDS, defaultBeach: DEFAULT_BEACH, beaches }));
+      return res.end(JSON.stringify({ version: VERSION, updated: Date.now(), dataAt, thresholds: THRESHOLDS, defaultBeach: DEFAULT_BEACH, beaches }));
     }
     const fc = url.match(/^\/api\/forecast\/([\w-]+)$/);
     if (fc) {
       const b = BEACHES.find((x) => x.id === fc[1]);
       if (!b) throw Object.assign(new Error("no beach"), { code: "ENOENT" });
       const report = await beachReport(b, 72, 1);
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({ thresholds: THRESHOLDS, ...report }));
     }
     const path = url === "/" ? "/index.html" : url === "/favicon.ico" ? "/icon.svg" : url;
     if (path.includes("..")) throw Object.assign(new Error("bad path"), { code: "ENOENT" });
     const body = await readFile(join(PUBLIC, path));
-    res.writeHead(200, { "Content-Type": TYPES[extname(path)] ?? "application/octet-stream" });
+    // Tablet browsers cache aggressively; make them revalidate so an update shows on reload.
+    res.writeHead(200, { "Content-Type": TYPES[extname(path)] ?? "application/octet-stream", "Cache-Control": "no-cache" });
     res.end(body);
   } catch (e) {
     res.writeHead(e.code === "ENOENT" ? 404 : 500);
     res.end(e.code === "ENOENT" ? "not found" : String(e));
   }
-}).listen(PORT, "0.0.0.0", () => process.stdout.write(`surf dashboard on :${PORT}\n`));
+}).listen(PORT, "0.0.0.0", () => process.stdout.write(`surf dashboard v${VERSION} on :${PORT}\n`));
