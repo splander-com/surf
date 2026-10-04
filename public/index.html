@@ -48,8 +48,9 @@
   .ic { color:#fff; width:36px; height:36px; border-radius:6px; display:grid; place-items:center;
         background:var(--off); filter:grayscale(1); opacity:.3; }
   .ic.on { filter:none; opacity:1; }
+  .ic.later { filter:none; opacity:.6; } /* works later today, not right now */
   .ic svg { width:82%; height:82%; }
-  .ic.on.sup { background:var(--sup); } .ic.on.surf { background:var(--surf); } .ic.on.wing { background:var(--wing); }
+  .ic:is(.on,.later).sup { background:var(--sup); } .ic:is(.on,.later).surf { background:var(--surf); } .ic:is(.on,.later).wing { background:var(--wing); }
   .err { color:#ff7a7a; font-size:13px; }
   #panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
            display:flex; flex-direction:column; min-height:0; }
@@ -138,8 +139,13 @@ function renderList(data) {
     `SUP ≤ ${data.thresholds.supMaxWaveM} m · Wing ≥ ${data.thresholds.wingMinWindKn} kn · updated ${fmtTime(data.updated)} · v${data.version}`;
   document.getElementById("list").innerHTML = data.beaches.map((b) => {
     const wa = b.now.wave, wi = b.now.wind;
-    const icons = Object.keys(ICONS).map((k) =>
-      `<div class="ic ${k} ${b.now.act[k] ? "on" : ""}" title="${LABEL[k]}" aria-label="${LABEL[k]}">${icon(k)}</div>`).join("");
+    // Lit if the sport works now; dimmer if it only works later today.
+    const today = b.hours.filter((h) => dayOf(h.t) === dayOf(b.now.t));
+    const icons = Object.keys(ICONS).map((k) => {
+      const st = b.now.act[k] ? "on" : today.some((h) => h.act[k]) ? "later" : "";
+      const tip = LABEL[k] + (st === "later" ? " (later today)" : "");
+      return `<div class="ic ${k} ${st}" title="${tip}" aria-label="${tip}">${icon(k)}</div>`;
+    }).join("");
     return `<div class="row ${b.id === selected ? "sel" : ""}" data-id="${b.id}">
       <div style="min-width:0"><div class="name">${b.name}${b.cam ? " 📹" : ""}</div>${b.he ? `<div class="he" dir="rtl" lang="he">${b.he}</div>` : ""}${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
       <div><div class="big">${n(wa?.m)} m</div><div class="sub">${n(wa?.period, 0)} s ${arrow(wa?.dir)}</div></div>
@@ -202,6 +208,8 @@ function renderChart(fc) {
   // wind line + gusts
   const line = pts.map((p, i) => p.wind ? `${x(i)},${yK(p.wind.kn)}` : null).filter(Boolean).join(" ");
   s += `<polyline points="${line}" fill="none" stroke="#ffb347" stroke-width="2.5"/>`;
+  // knot labels on the wind line every 6 h
+  pts.forEach((p, i) => { if (p.wind?.kn != null && i % 6 === 0) s += `<text x="${x(i)}" y="${yK(p.wind.kn) - 6}" fill="#ffb347" font-size="11" font-weight="700" text-anchor="middle" paint-order="stroke" stroke="#0f1830" stroke-width="3">${Math.round(p.wind.kn)}</text>`; });
   pts.forEach((p, i) => { if (p.wind?.gust != null && i % 3 === 0) s += `<circle cx="${x(i)}" cy="${yK(p.wind.gust)}" r="1.8" fill="#ffb34799"/>`; });
   // now marker
   s += `<line x1="${x(0)}" x2="${x(0)}" y1="${TOP}" y2="${TOP + ph}" stroke="#e6edf7" stroke-width="1" opacity=".6"/>`;
@@ -246,7 +254,7 @@ window.addEventListener("resize", () => lastForecast && renderChart(lastForecast
 // Stale badge: shown when the newest data we hold was fetched > 30 min ago —
 // whether the server is serving an old copy (upstream down) or we can't reach it.
 const STALE_MS = 30 * 60 * 1000;
-let dataAt = null, retry = null;
+let dataAt = null, retry = null, pageVersion = null;
 function checkStale() {
   const b = document.getElementById("stale");
   const old = dataAt == null || Date.now() - dataAt > STALE_MS;
@@ -259,6 +267,9 @@ async function load() {
     const res = await fetch("/api/conditions", { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    // Server was updated: reload so the wall tablet picks up the new page by itself.
+    if (pageVersion && data.version !== pageVersion) return location.reload();
+    pageVersion = data.version;
     if (!selected || !data.beaches.some((b) => b.id === selected)) selected = data.defaultBeach;
     if (data.dataAt != null) dataAt = data.dataAt;
     renderList(data);
