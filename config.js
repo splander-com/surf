@@ -6,9 +6,12 @@ export const BEACHES = [
   { id: "neve-yam", name: "Neve Yam", he: "נווה ים", lat: 32.681, lon: 34.925, wgSpot: 4895 },
   { id: "sdot-yam", name: "Sdot Yam", he: "שדות ים", lat: 32.49, lon: 34.884, wgSpot: 736 },
   { id: "herzliya", name: "Herzliya (Sidney Ali)", he: "הרצליה, סידני עלי", lat: 32.172, lon: 34.8, wgSpot: 308 },
+  { id: "zvulun", name: "Herzliya / Zvulun", he: "הרצליה, חוף זבולון", lat: 32.166, lon: 34.799, wgSpot: 308 },
+  { id: "herzliya-marina", name: "Herzliya Marina", he: "הרצליה, מרינה", lat: 32.161, lon: 34.796, wgSpot: 308 },
   { id: "hilton", name: "Hilton / Metzitzim", he: "הילטון / מציצים", lat: 32.093, lon: 34.767, wgSpot: 308 },
   { id: "gordon", name: "Gordon / Frishman", he: "גורדון / פרישמן", lat: 32.083, lon: 34.766, wgSpot: 308 },
   { id: "jaffa", name: "Jaffa / Givat Aliyah", he: "יפו / גבעת עלייה", lat: 32.045, lon: 34.748, wgSpot: 769 },
+  { id: "maravi", name: "Jaffa / Maravi", he: "יפו / חוף מערבי", lat: 32.037, lon: 34.744, wgSpot: 769 },
   { id: "bat-yam", name: "Bat Yam", he: "בת ים", lat: 32.02, lon: 34.742, wgSpot: 769 },
   { id: "ashdod", name: "Ashdod", he: "אשדוד", lat: 31.8, lon: 34.63, wgSpot: null,
     // YouTube live, "אשדוד - חוף יא'" (also used by SkylineWebcams Oranim Beach)
