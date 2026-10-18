@@ -1,6 +1,6 @@
 {
   "name": "surf",
-  "version": "1.4.0",
+  "version": "1.4.2",
   "private": true,
   "type": "module",
   "description": "SUP / surf / wing conditions dashboard for Israeli beaches",

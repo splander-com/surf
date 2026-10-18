@@ -116,6 +116,15 @@
   </section>
 </main>
 <script>
+// Kiosk debugging: show script errors on screen instead of a blank page.
+window.onerror = function (msg, src, line) {
+  var d = document.getElementById("jserr") || document.body.appendChild(document.createElement("div"));
+  d.id = "jserr";
+  d.style.cssText = "position:fixed;left:0;right:0;bottom:0;background:#b00020;color:#fff;font:14px sans-serif;padding:6px 10px;z-index:9";
+  d.textContent = "Page error: " + msg + " (line " + line + ") — " + navigator.userAgent;
+};
+</script>
+<script>
 // Pictograms (SVG symbols at the top of <body>): paddler on a board, surfer under a wave, winger.
 const ICONS = { sup: "ic-sup", surf: "ic-surf", wing: "ic-wing" };
 const COLOR = { sup: "#35c7a5", surf: "#4c9dff", wing: "#ffb347" };
@@ -123,11 +132,17 @@ const icon = (k) => `<svg aria-hidden="true"><use href="#${ICONS[k]}"/></svg>`;
 const LABEL = { sup: "SUP", surf: "Surf", wing: "Wing" };
 const TZ = "Asia/Jerusalem";
 let selected = null, lastForecast = null;
-try { selected = localStorage.getItem("sel") || null; } catch {}
+try { selected = localStorage.getItem("sel") || null; } catch (e) {}
 
-const fmtTime = (t) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
-const hourOf = (t) => Number(new Date(t).toLocaleString("en-GB", { hour: "2-digit", hour12: false, timeZone: TZ }));
-const dayOf = (t) => new Date(t).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", timeZone: TZ });
+// Old Android browsers can lack time-zone data and throw on { timeZone }; the tablet
+// is in Israel anyway, so fall back to its own clock.
+const tz = (o) => { try { new Date().toLocaleString("en-GB", { timeZone: TZ }); o.timeZone = TZ; } catch (e) {} return o; };
+const fmtTime = (t) => new Date(t).toLocaleTimeString("en-GB", tz({ hour: "2-digit", minute: "2-digit" }));
+const hourOf = (t) => parseInt(new Date(t).toLocaleString("en-GB", tz({ hour: "2-digit", hour12: false })), 10) % 24;
+const dayOf = (t) => new Date(t).toLocaleDateString("en-GB", tz({ weekday: "short", day: "numeric" }));
+// Property of a value that may be null/undefined (instead of ?. so older browsers can parse this).
+const get = (o, k) => (o == null ? undefined : o[k]);
+const or = (v, d) => (v == null ? d : v);
 // Meteorological direction = where it comes FROM; the arrow points where it goes.
 const arrow = (deg) => deg == null ? "" : `<span class="arrow" style="transform:rotate(${deg + 180}deg)">↑</span>`;
 const n = (v, d = 1) => v == null ? "–" : v.toFixed(d);
@@ -148,8 +163,8 @@ function renderList(data) {
     }).join("");
     return `<div class="row ${b.id === selected ? "sel" : ""}" data-id="${b.id}">
       <div style="min-width:0"><div class="name">${b.name}${b.cam ? " 📹" : ""}</div>${b.he ? `<div class="he" dir="rtl" lang="he">${b.he}</div>` : ""}${b.errors.length ? `<div class="err">partial data</div>` : ""}</div>
-      <div><div class="big">${n(wa?.m)} m</div><div class="sub">${n(wa?.period, 0)} s ${arrow(wa?.dir)}</div></div>
-      <div><div class="big">${n(wi?.kn, 0)} kn</div><div class="sub">G ${n(wi?.gust, 0)} ${arrow(wi?.dir)}</div></div>
+      <div><div class="big">${n(get(wa, "m"))} m</div><div class="sub">${n(get(wa, "period"), 0)} s ${arrow(get(wa, "dir"))}</div></div>
+      <div><div class="big">${n(get(wi, "kn"), 0)} kn</div><div class="sub">G ${n(get(wi, "gust"), 0)} ${arrow(get(wi, "dir"))}</div></div>
       <div class="icons">${icons}</div>
     </div>`;
   }).join("");
@@ -161,10 +176,10 @@ function renderChart(fc) {
   lastForecast = fc;
   const cam = document.getElementById("cam");
   // Only swap the iframe when the camera changes, so a refresh doesn't restart the video.
-  const c = fc.cam, src = /^https:\/\//.test(c?.url ?? "") ? c.url : "";
-  if (src !== (cam.dataset.src ?? "")) {
+  const c = fc.cam, src = /^https:\/\//.test(or(get(c, "url"), "")) ? c.url : "";
+  if (src !== or(cam.dataset.src, "")) {
     cam.dataset.src = src;
-    const credit = c?.source
+    const credit = get(c, "source")
       ? `<div class="credit">📹 ${esc(c.title)}${c.kind === "day" ? " · today's timelapse" : ""}${c.km != null ? ` · ${c.km.toFixed(1)} km` : ""} · webcams by ${esc(c.source)}</div>`
       : "";
     cam.innerHTML = src
@@ -175,8 +190,8 @@ function renderChart(fc) {
   const W = Math.max(300, el.clientWidth), H = Math.max(200, el.clientHeight);
   const T = fc.thresholds, pts = fc.hours;
   const L = 34, R = 32, TOP = 30, BOT = 46, pw = W - L - R, ph = H - TOP - BOT;
-  const maxM = Math.max(1, T.supMaxWaveM * 2, ...pts.map((p) => p.wave?.m ?? 0)) * 1.1;
-  const maxK = Math.max(20, T.wingMinWindKn * 1.5, ...pts.map((p) => p.wind?.gust ?? p.wind?.kn ?? 0)) * 1.1;
+  const maxM = Math.max(1, T.supMaxWaveM * 2, ...pts.map((p) => or(get(p.wave, "m"), 0))) * 1.1;
+  const maxK = Math.max(20, T.wingMinWindKn * 1.5, ...pts.map((p) => or(get(p.wind, "gust"), or(get(p.wind, "kn"), 0)))) * 1.1;
   const x = (i) => L + (i + 0.5) * pw / pts.length;
   const yM = (m) => TOP + ph - (m / maxM) * ph;
   const yK = (k) => TOP + ph - (k / maxK) * ph;
@@ -199,7 +214,7 @@ function renderChart(fc) {
   }
   // wave bars
   pts.forEach((p, i) => {
-    const m = p.wave?.m; if (m == null) return;
+    const m = get(p.wave, "m"); if (m == null) return;
     s += `<rect x="${x(i) - bw / 2}" y="${yM(m)}" width="${bw}" height="${TOP + ph - yM(m)}" fill="${m <= T.supMaxWaveM ? "#35c7a5" : "#4c9dff"}" opacity=".85"/>`;
   });
   // thresholds
@@ -209,8 +224,8 @@ function renderChart(fc) {
   const line = pts.map((p, i) => p.wind ? `${x(i)},${yK(p.wind.kn)}` : null).filter(Boolean).join(" ");
   s += `<polyline points="${line}" fill="none" stroke="#ffb347" stroke-width="2.5"/>`;
   // knot labels on the wind line every 6 h
-  pts.forEach((p, i) => { if (p.wind?.kn != null && i % 6 === 0) s += `<text x="${x(i)}" y="${yK(p.wind.kn) - 6}" fill="#ffb347" font-size="11" font-weight="700" text-anchor="middle" paint-order="stroke" stroke="#0f1830" stroke-width="3">${Math.round(p.wind.kn)}</text>`; });
-  pts.forEach((p, i) => { if (p.wind?.gust != null && i % 3 === 0) s += `<circle cx="${x(i)}" cy="${yK(p.wind.gust)}" r="1.8" fill="#ffb34799"/>`; });
+  pts.forEach((p, i) => { if (get(p.wind, "kn") != null && i % 6 === 0) s += `<text x="${x(i)}" y="${yK(p.wind.kn) - 6}" fill="#ffb347" font-size="11" font-weight="700" text-anchor="middle" paint-order="stroke" stroke="#0f1830" stroke-width="3">${Math.round(p.wind.kn)}</text>`; });
+  pts.forEach((p, i) => { if (get(p.wind, "gust") != null && i % 3 === 0) s += `<circle cx="${x(i)}" cy="${yK(p.wind.gust)}" r="1.8" fill="#ffb34799"/>`; });
   // now marker
   s += `<line x1="${x(0)}" x2="${x(0)}" y1="${TOP}" y2="${TOP + ph}" stroke="#e6edf7" stroke-width="1" opacity=".6"/>`;
   // bottom rows: hour, wind arrow, activity icons (every 3 h)
@@ -218,7 +233,7 @@ function renderChart(fc) {
     if (i % 3) return;
     const cx = x(i);
     s += `<text x="${cx}" y="${TOP + ph + 12}" fill="#8193b2" font-size="11" text-anchor="middle">${String(hourOf(p.t)).padStart(2, "0")}</text>`;
-    if (p.wind?.dir != null) s += `<text x="${cx}" y="${TOP + ph + 24}" fill="#ffb347" font-size="12" text-anchor="middle" transform="rotate(${p.wind.dir + 180} ${cx} ${TOP + ph + 21})">↑</text>`;
+    if (get(p.wind, "dir") != null) s += `<text x="${cx}" y="${TOP + ph + 24}" fill="#ffb347" font-size="12" text-anchor="middle" transform="rotate(${p.wind.dir + 180} ${cx} ${TOP + ph + 21})">↑</text>`;
     // activity pictograms, stacked side by side and centred on the hour
     const on = Object.keys(ICONS).filter((k) => p.act[k]), sz = 13;
     on.forEach((k, j) => {
@@ -228,7 +243,7 @@ function renderChart(fc) {
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="72 hour forecast for ${fc.name}">${s}</svg>`;
   document.getElementById("ptitle").innerHTML =
     `${esc(fc.name)}${fc.he ? ` · <bdi class="he" dir="rtl" lang="he">${esc(fc.he)}</bdi>` : ""} <small>· 72 h</small>`;
-  const filled = fc.windSource.startsWith("Windguru") && pts.some((p) => p.wind?.src === "om");
+  const filled = fc.windSource.startsWith("Windguru") && pts.some((p) => get(p.wind, "src") === "om");
   const wsrc = document.getElementById("wsrc");
   wsrc.textContent = fc.windSource.replace(/ WRF.*/, "") + (filled ? " → Open-Meteo" : "");
   wsrc.title = fc.windSource + (filled ? ", then Open-Meteo past Windguru's forecast horizon" : "");
@@ -238,14 +253,14 @@ async function loadForecast() {
   try {
     const res = await fetch(`/api/forecast/${selected}`);
     if (res.ok) renderChart(await res.json());
-  } catch {}
+  } catch (e) {}
 }
 
 document.getElementById("list").addEventListener("click", (e) => {
   const row = e.target.closest(".row");
   if (!row || row.dataset.id === selected) return;
   selected = row.dataset.id;
-  try { localStorage.setItem("sel", selected); } catch {}
+  try { localStorage.setItem("sel", selected); } catch (e) {}
   document.querySelectorAll(".row").forEach((r) => r.classList.toggle("sel", r.dataset.id === selected));
   loadForecast();
 });
