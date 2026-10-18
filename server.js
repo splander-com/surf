@@ -194,6 +194,11 @@ const TYPES = {
 };
 
 createServer(async (req, res) => {
+  // One line per request (shows up in `docker logs surf`): which device asked for what,
+  // and with which browser — the quickest way to debug the kiosk tablet from the server.
+  res.on("finish", () => console.log(
+    `${new Date().toISOString()} ${req.socket.remoteAddress} ${res.statusCode} ${req.url} "${req.headers["user-agent"] ?? "-"}"`,
+  ));
   try {
     const url = req.url.split("?")[0];
     if (url === "/api/conditions") {
